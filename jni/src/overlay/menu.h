@@ -22,6 +22,7 @@ struct Config {
     bool netEnabled     = false;   // 网络共享开启
     char serverIP[32]   = "192.168.1.100";
     int  serverPort     = 8888;
+    bool touchAltMapping = false;  // 触摸坐标备用映射
 
     // 绘制配置
     float mapScale      = 150.0f;  // 小地图缩放
@@ -37,6 +38,17 @@ static bool   g_ballDragging = false;
 static ImVec2 g_ballPos = ImVec2(50.0f, 300.0f);
 static float  g_ballRadius = 30.0f;
 static bool   g_ballPosInited = false;
+static bool   g_ballPrevDown = false;
+static bool   g_ballMoved = false;
+static ImVec2 g_ballPressPos = ImVec2(0.0f, 0.0f);
+static ImVec2 g_ballStartPos = ImVec2(0.0f, 0.0f);
+static bool   g_exitRequested = false;
+
+inline bool ConsumeExitRequest() {
+    bool requested = g_exitRequested;
+    g_exitRequested = false;
+    return requested;
+}
 
 // 绘制浮动悬浮球 (点击切换菜单)
 inline void DrawFloatingBall() {
@@ -69,19 +81,47 @@ inline void DrawFloatingBall() {
     ImVec2 mousePos = io.MousePos;
     float dist = sqrtf((mousePos.x - g_ballPos.x) * (mousePos.x - g_ballPos.x) +
                        (mousePos.y - g_ballPos.y) * (mousePos.y - g_ballPos.y));
+    bool down = io.MouseDown[0];
+    bool justPressed = down && !g_ballPrevDown;
+    bool justReleased = !down && g_ballPrevDown;
+    const float hitRadius = g_ballRadius * 1.6f;
 
-    if (io.MouseClicked[0] && dist < g_ballRadius * 1.5f) {
+    if (justPressed && dist < hitRadius) {
         g_ballDragging = true;
+        g_ballMoved = false;
+        g_ballPressPos = mousePos;
+        g_ballStartPos = g_ballPos;
     }
-    if (g_ballDragging && io.MouseDown[0]) {
-        g_ballPos = mousePos;
-    }
-    if (g_ballDragging && io.MouseReleased[0]) {
-        g_ballDragging = false;
-        if (dist < g_ballRadius) {
-            g_config.showMenu = !g_config.showMenu;
+
+    if (g_ballDragging && down) {
+        float dx = mousePos.x - g_ballPressPos.x;
+        float dy = mousePos.y - g_ballPressPos.y;
+        if (fabsf(dx) > 4.0f || fabsf(dy) > 4.0f) {
+            g_ballMoved = true;
+        }
+
+        g_ballPos.x = g_ballStartPos.x + dx;
+        g_ballPos.y = g_ballStartPos.y + dy;
+
+        // 约束在屏幕内，避免拖出可见区域
+        if (io.DisplaySize.x > 0.0f) {
+            if (g_ballPos.x < g_ballRadius) g_ballPos.x = g_ballRadius;
+            if (g_ballPos.x > io.DisplaySize.x - g_ballRadius) g_ballPos.x = io.DisplaySize.x - g_ballRadius;
+        }
+        if (io.DisplaySize.y > 0.0f) {
+            if (g_ballPos.y < g_ballRadius) g_ballPos.y = g_ballRadius;
+            if (g_ballPos.y > io.DisplaySize.y - g_ballRadius) g_ballPos.y = io.DisplaySize.y - g_ballRadius;
         }
     }
+
+    if (g_ballDragging && justReleased) {
+        if (!g_ballMoved && dist < hitRadius) {
+            g_config.showMenu = !g_config.showMenu;
+        }
+        g_ballDragging = false;
+    }
+
+    g_ballPrevDown = down;
 }
 
 // 绘制设置面板
@@ -89,37 +129,54 @@ inline void DrawMenu() {
     if (!g_config.showMenu) return;
 
     ImGui::SetNextWindowSize(ImVec2(380, 500), ImGuiCond_FirstUseEver);
-    ImGui::Begin("哈皮哈啤哈屁 设置", &g_config.showMenu,
+    ImGui::Begin("HPHP Settings", &g_config.showMenu,
         ImGuiWindowFlags_NoCollapse);
 
-    // ===== 显示设置 =====
-    if (ImGui::CollapsingHeader("显示设置", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Checkbox("小地图点位",   &g_config.showMinimap);
-        ImGui::Checkbox("ESP 方框",     &g_config.showESP);
-        ImGui::Checkbox("技能CD显示",   &g_config.showSkillCD);
-        ImGui::Checkbox("视野警示",     &g_config.showVisionAlert);
-        ImGui::Checkbox("野怪计时",     &g_config.showMonsterCD);
-        ImGui::Checkbox("兵线显示 (TODO)", &g_config.showMinions);
+    // ===== Display =====
+    if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Minimap", &g_config.showMinimap);
+        ImGui::Checkbox("ESP Box", &g_config.showESP);
+        ImGui::Checkbox("Skill CD", &g_config.showSkillCD);
+        ImGui::Checkbox("Vision Alert", &g_config.showVisionAlert);
+        ImGui::Checkbox("Monster Timer", &g_config.showMonsterCD);
+        ImGui::Checkbox("Minions (TODO)", &g_config.showMinions);
     }
 
     ImGui::Separator();
 
-    // ===== 绘制配置 =====
-    if (ImGui::CollapsingHeader("绘制配置")) {
-        ImGui::SliderFloat("地图缩放", &g_config.mapScale, 80.0f, 300.0f);
-        ImGui::SliderFloat("地图X偏移", &g_config.mapOffsetX, 0.0f, 500.0f);
-        ImGui::SliderFloat("地图Y偏移", &g_config.mapOffsetY, 0.0f, 500.0f);
-        ImGui::SliderFloat("ESP线宽", &g_config.espLineWidth, 1.0f, 5.0f);
+    // ===== Render =====
+    if (ImGui::CollapsingHeader("Render")) {
+        ImGui::SliderFloat("Map Scale", &g_config.mapScale, 80.0f, 300.0f);
+        ImGui::SliderFloat("Map Offset X", &g_config.mapOffsetX, 0.0f, 500.0f);
+        ImGui::SliderFloat("Map Offset Y", &g_config.mapOffsetY, 0.0f, 500.0f);
+        ImGui::SliderFloat("ESP Line Width", &g_config.espLineWidth, 1.0f, 5.0f);
     }
 
     ImGui::Separator();
 
-    // ===== 网络设置 =====
-    if (ImGui::CollapsingHeader("网络共享")) {
-        ImGui::Checkbox("启用网络共享", &g_config.netEnabled);
-        ImGui::Checkbox("作为服务端",   &g_config.isServer);
-        ImGui::InputText("服务器IP", g_config.serverIP, sizeof(g_config.serverIP));
-        ImGui::InputInt("端口", &g_config.serverPort);
+    // ===== Network =====
+    if (ImGui::CollapsingHeader("Network")) {
+        ImGui::Checkbox("Enable Network Share", &g_config.netEnabled);
+        ImGui::Checkbox("Server Mode", &g_config.isServer);
+        ImGui::InputText("Server IP", g_config.serverIP, sizeof(g_config.serverIP));
+        ImGui::InputInt("Port", &g_config.serverPort);
+    }
+
+    ImGui::Separator();
+
+    // ===== Touch =====
+    if (ImGui::CollapsingHeader("Touch")) {
+        ImGui::Checkbox("Alt Mapping", &g_config.touchAltMapping);
+        ImGui::TextWrapped("If drag works only on one axis or is rotated, toggle Alt Mapping.");
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button("Hide Menu")) {
+        g_config.showMenu = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Exit Tool")) {
+        g_exitRequested = true;
     }
 
     ImGui::End();

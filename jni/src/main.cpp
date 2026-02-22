@@ -122,6 +122,7 @@ int main(int argc, char** argv) {
         printf("[Touch] 显示方向: %d, 显示尺寸: %dx%d\n", di.orientation, di.width, di.height);
     }
     if (Touch::Init({(float)screenW, (float)screenH}, true)) {
+        Touch::setOtherTouch(g_config.touchAltMapping);
         printf("[✓] 触摸输入初始化完成 (只读模式)\n");
     } else {
         printf("[!] 触摸输入初始化失败 (悬浮球不可交互)\n");
@@ -137,6 +138,23 @@ int main(int argc, char** argv) {
 
     while (true) {
         g_loopCount++;
+
+        // 动态刷新触摸方向和备用映射（处理旋转/机型差异）
+        static int lastTouchOrientation = -1;
+        static bool lastAltMapping = g_config.touchAltMapping;
+        if ((g_loopCount % 60) == 1) {
+            auto curDi = android::ANativeWindowCreator::GetDisplayInfo();
+            if (curDi.width > 0 && curDi.height > 0 && curDi.orientation != lastTouchOrientation) {
+                lastTouchOrientation = curDi.orientation;
+                Touch::setOrientation(curDi.orientation);
+                printf("[Touch] 方向更新: %d (%dx%d)\n", curDi.orientation, curDi.width, curDi.height);
+            }
+        }
+        if (lastAltMapping != g_config.touchAltMapping) {
+            lastAltMapping = g_config.touchAltMapping;
+            Touch::setOtherTouch(g_config.touchAltMapping);
+            printf("[Touch] Alt Mapping: %s\n", g_config.touchAltMapping ? "ON" : "OFF");
+        }
 
         // 1. 读取游戏数据
         g_phase = "reader.Update";
@@ -206,6 +224,11 @@ int main(int argc, char** argv) {
         // 6. 结束渲染帧
         g_phase = "overlay_end";
         overlay_end();
+
+        if (ConsumeExitRequest()) {
+            printf("[Main] 收到退出请求，正在退出...\n");
+            break;
+        }
 
         // 7. 帧率控制 (~60FPS)
         usleep(16000);
