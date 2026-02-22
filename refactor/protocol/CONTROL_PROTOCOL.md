@@ -41,3 +41,14 @@ ERR INVALID_ARG
 The launcher already exposes menu items for draw control, but the actual IPC transport is not implemented yet.
 Until the core control endpoint is implemented, those menu actions log a placeholder message and keep state for operator workflow consistency.
 
+Phase-1 queue file (current temporary implementation):
+
+- File: `refactor/runtime/control.cmd`
+- Format: `SEQ|TIMESTAMP|CMD`
+
+Examples:
+
+```text
+1|2026-02-22 21:10:03|INIT_DRAW
+2|2026-02-22 21:10:08|STOP_DRAW
+```

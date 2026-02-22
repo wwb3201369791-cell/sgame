@@ -15,14 +15,22 @@ STATE_FILE="$RUNTIME_DIR/state.env"
 PID_FILE="$RUNTIME_DIR/core.pid"
 LOG_FILE="$LOG_DIR/core.log"
 CONTROL_FILE="$RUNTIME_DIR/control.cmd"
+CONTROL_SEQ_FILE="$RUNTIME_DIR/control.seq"
 
 mkdir -p "$CONF_DIR" "$RUNTIME_DIR" "$LOG_DIR"
 [ -f "$STATE_FILE" ] || : > "$STATE_FILE"
 [ -f "$LOG_FILE" ] || : > "$LOG_FILE"
 [ -f "$CONTROL_FILE" ] || : > "$CONTROL_FILE"
+[ -f "$CONTROL_SEQ_FILE" ] || printf '0\n' > "$CONTROL_SEQ_FILE"
 
 log() {
     printf '%s\n' "$*"
+}
+
+shell_quote() {
+    # Quote values for shell-style KEY=VALUE config files.
+    # This preserves spaces and special characters when we source user.env.
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
 pause() {
@@ -62,12 +70,12 @@ load_conf() {
 save_conf() {
     tmp="$CONF_FILE.tmp"
     cat > "$tmp" <<EOF
-DRIVER_MODE=$DRIVER_MODE
-GAME_PKG=$GAME_PKG
-CORE_BIN=$CORE_BIN
-AUTO_INIT_DRAW=$AUTO_INIT_DRAW
-LOG_LEVEL=$LOG_LEVEL
-EXTRA_ARGS=$EXTRA_ARGS
+DRIVER_MODE=$(shell_quote "$DRIVER_MODE")
+GAME_PKG=$(shell_quote "$GAME_PKG")
+CORE_BIN=$(shell_quote "$CORE_BIN")
+AUTO_INIT_DRAW=$(shell_quote "$AUTO_INIT_DRAW")
+LOG_LEVEL=$(shell_quote "$LOG_LEVEL")
+EXTRA_ARGS=$(shell_quote "$EXTRA_ARGS")
 EOF
     mv "$tmp" "$CONF_FILE"
 }
@@ -97,13 +105,49 @@ now_ts() {
     date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown-time"
 }
 
+next_control_seq() {
+    seq=0
+    if [ -f "$CONTROL_SEQ_FILE" ]; then
+        seq=$(cat "$CONTROL_SEQ_FILE" 2>/dev/null || echo 0)
+    fi
+    case "$seq" in
+        ''|*[!0-9]*) seq=0 ;;
+    esac
+    seq=$((seq + 1))
+    printf '%s\n' "$seq" > "$CONTROL_SEQ_FILE"
+    printf '%s\n' "$seq"
+}
+
+append_control_cmd() {
+    cmd=$1
+    seq=$(next_control_seq)
+    ts=$(now_ts)
+    printf '%s|%s|%s\n' "$seq" "$ts" "$cmd" >> "$CONTROL_FILE"
+    write_state LAST_CONTROL_SEQ "$seq"
+    write_state LAST_CONTROL_TS "$ts"
+    write_state LAST_CONTROL_CMD "$cmd"
+}
+
 find_game_pid() {
     pkg="$1"
+    pid=""
     if command -v pidof >/dev/null 2>&1; then
-        pidof "$pkg" 2>/dev/null | awk '{print $1}' && return 0
+        pid=$(pidof "$pkg" 2>/dev/null | awk '{print $1}' || true)
+        if [ -n "${pid:-}" ]; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
     fi
-    ps 2>/dev/null | awk -v p="$pkg" '$0 ~ p {print $2; exit}' && return 0
-    ps -A 2>/dev/null | awk -v p="$pkg" '$0 ~ p {print $2; exit}' && return 0
+    pid=$(ps 2>/dev/null | awk -v p="$pkg" '$0 ~ p {print $2; exit}' || true)
+    if [ -n "${pid:-}" ]; then
+        printf '%s\n' "$pid"
+        return 0
+    fi
+    pid=$(ps -A 2>/dev/null | awk -v p="$pkg" '$0 ~ p {print $2; exit}' || true)
+    if [ -n "${pid:-}" ]; then
+        printf '%s\n' "$pid"
+        return 0
+    fi
     return 1
 }
 
@@ -132,20 +176,25 @@ show_header() {
     load_conf
     stop_core_if_stale
     pid=$(core_pid || true)
+    last_game_pid=$(get_state LAST_GAME_PID || true)
+    draw_req=$(get_state DRAW_REQUESTED || true)
+    [ -n "${draw_req:-}" ] || draw_req=0
     running=0
     if [ -n "${pid:-}" ] && is_pid_running "$pid"; then
         running=1
     fi
 
     echo "========================================"
-    echo "  SGAME Refactor Launcher (Phase-1)"
+    echo "  视野共享重构启动器 (Phase-1)"
     echo "========================================"
-    echo "Driver Mode : $DRIVER_MODE"
-    echo "Game Pkg    : $GAME_PKG"
-    echo "Core Bin    : $CORE_BIN"
-    echo "Core PID    : ${pid:-N/A} (running=$running)"
-    echo "Auto Draw   : $AUTO_INIT_DRAW"
-    echo "Log File    : $LOG_FILE"
+    echo "驱动模式       : $DRIVER_MODE"
+    echo "游戏包名       : $GAME_PKG"
+    echo "核心路径       : $CORE_BIN"
+    echo "核心PID        : ${pid:-N/A} (运行=$running)"
+    echo "最近游戏PID    : ${last_game_pid:-N/A}"
+    echo "自动初始化绘制 : $AUTO_INIT_DRAW"
+    echo "绘制请求状态   : $draw_req"
+    echo "日志文件       : $LOG_FILE"
     echo "----------------------------------------"
 }
 
@@ -190,6 +239,53 @@ set_core_bin() {
     save_conf
     write_state LAST_ACTION "set_core_bin"
     log "[+] 核心路径已更新: $CORE_BIN"
+    pause
+}
+
+set_game_pkg() {
+    load_conf
+    printf "输入游戏包名 (当前: %s): " "$GAME_PKG"
+    read newpkg || return
+    [ -n "${newpkg:-}" ] || { log "[!] 包名不能为空"; pause; return; }
+    GAME_PKG="$newpkg"
+    save_conf
+    write_state LAST_ACTION "set_game_pkg"
+    log "[+] 游戏包名已更新: $GAME_PKG"
+    pause
+}
+
+set_log_level() {
+    load_conf
+    echo "选择日志级别:"
+    echo "1) error"
+    echo "2) warn"
+    echo "3) info"
+    echo "4) debug"
+    printf "输入编号 (当前: %s): " "$LOG_LEVEL"
+    read choice || return
+    case "$choice" in
+        1) LOG_LEVEL=error ;;
+        2) LOG_LEVEL=warn ;;
+        3) LOG_LEVEL=info ;;
+        4) LOG_LEVEL=debug ;;
+        *) log "[!] 无效选择"; pause; return ;;
+    esac
+    save_conf
+    write_state LAST_ACTION "set_log_level:$LOG_LEVEL"
+    log "[+] 日志级别已设置: $LOG_LEVEL"
+    pause
+}
+
+set_extra_args() {
+    load_conf
+    echo "输入额外启动参数 (当前: $EXTRA_ARGS)"
+    echo "说明: 按 shell 空格分词；直接回车可清空。"
+    printf "> "
+    read newargs || return
+    EXTRA_ARGS="$newargs"
+    save_conf
+    write_state LAST_ACTION "set_extra_args"
+    log "[+] EXTRA_ARGS 已更新: ${EXTRA_ARGS:-<empty>}"
     pause
 }
 
@@ -241,26 +337,53 @@ start_core() {
 
     log "[...] 启动核心进程..."
     log "    driver=$DRIVER_MODE game_pkg=$GAME_PKG"
+    game_pid=$(find_game_pid "$GAME_PKG" || true)
+    if [ -n "${game_pid:-}" ]; then
+        write_state LAST_GAME_PID "$game_pid"
+        log "    检测到游戏PID: $game_pid"
+    else
+        log "    当前未检测到游戏PID，核心将自行等待游戏。"
+    fi
 
     # Phase-1: use env vars + optional extra args for legacy compatibility.
     # The future refactor core will consume these values via CLI.
-    sh -c "SGAME_DRIVER='$DRIVER_MODE' SGAME_GAME_PKG='$GAME_PKG' SGAME_LOG_LEVEL='$LOG_LEVEL' nohup '$CORE_BIN' $EXTRA_ARGS >> '$LOG_FILE' 2>&1 & echo \$! > '$PID_FILE'" || {
+    (
+        export SGAME_DRIVER="$DRIVER_MODE"
+        export SGAME_GAME_PKG="$GAME_PKG"
+        export SGAME_LOG_LEVEL="$LOG_LEVEL"
+        export SGAME_CONTROL_FILE="$CONTROL_FILE"
+        if [ -n "${game_pid:-}" ]; then
+            export SGAME_GAME_PID="$game_pid"
+        fi
+        # Intentional split for operator-provided argument line.
+        # shellcheck disable=SC2086
+        nohup "$CORE_BIN" $EXTRA_ARGS >> "$LOG_FILE" 2>&1 &
+        echo $! > "$PID_FILE"
+    ) || {
         log "[-] 启动失败"
         pause
         return
     }
 
     pid=$(core_pid || true)
-    write_state CORE_RUNNING 1
+    sleep 1
+    if [ -n "${pid:-}" ] && is_pid_running "$pid"; then
+        write_state CORE_RUNNING 1
+    else
+        write_state CORE_RUNNING 0
+        log "[!] 核心进程启动后很快退出，请查看日志。"
+    fi
     write_state LAST_START_TS "$(now_ts)"
     write_state LAST_DRIVER "$DRIVER_MODE"
     write_state LAST_ACTION "start_core"
+    write_state LAST_LOG_LEVEL "$LOG_LEVEL"
 
     log "[+] 核心进程已启动: ${pid:-unknown}"
 
     if [ "$AUTO_INIT_DRAW" = "1" ]; then
-        echo "INIT_DRAW" >> "$CONTROL_FILE"
-        log "[i] AUTO_INIT_DRAW=1, 已写入 INIT_DRAW (占位命令)"
+        append_control_cmd "INIT_DRAW"
+        write_state DRAW_REQUESTED 1
+        log "[i] AUTO_INIT_DRAW=1, 已写入 INIT_DRAW (阶段1队列命令)"
     fi
 
     pause
@@ -296,17 +419,19 @@ stop_core() {
 
 init_draw() {
     # Phase-1 placeholder: keep operator workflow stable before control IPC exists.
-    echo "INIT_DRAW" >> "$CONTROL_FILE"
+    append_control_cmd "INIT_DRAW"
+    write_state DRAW_REQUESTED 1
     write_state LAST_ACTION "init_draw"
-    log "[i] 已记录 INIT_DRAW 命令（阶段1占位）。"
+    log "[i] 已记录 INIT_DRAW 命令（阶段1队列）。"
     log "    等核心接入 control endpoint 后会变为实时控制。"
     pause
 }
 
 stop_draw() {
-    echo "STOP_DRAW" >> "$CONTROL_FILE"
+    append_control_cmd "STOP_DRAW"
+    write_state DRAW_REQUESTED 0
     write_state LAST_ACTION "stop_draw"
-    log "[i] 已记录 STOP_DRAW 命令（阶段1占位）。"
+    log "[i] 已记录 STOP_DRAW 命令（阶段1队列）。"
     pause
 }
 
@@ -326,8 +451,8 @@ toggle_auto_init_draw() {
 show_status() {
     load_conf
     stop_core_if_stale
-    echo "======== STATUS ========"
-    echo "-- Config --"
+    echo "======== 状态 ========"
+    echo "-- 配置 --"
     echo "DRIVER_MODE=$DRIVER_MODE"
     echo "GAME_PKG=$GAME_PKG"
     echo "CORE_BIN=$CORE_BIN"
@@ -335,14 +460,14 @@ show_status() {
     echo "LOG_LEVEL=$LOG_LEVEL"
     echo "EXTRA_ARGS=$EXTRA_ARGS"
     echo
-    echo "-- Runtime --"
+    echo "-- 运行态 --"
     if [ -f "$STATE_FILE" ]; then
         cat "$STATE_FILE"
     else
-        echo "(no state file)"
+        echo "(无状态文件)"
     fi
     echo
-    echo "-- PID --"
+    echo "-- 进程 --"
     pid=$(core_pid || true)
     if [ -n "${pid:-}" ]; then
         echo "core.pid=$pid"
@@ -355,14 +480,22 @@ show_status() {
         echo "core.pid=(none)"
     fi
     echo
-    echo "-- Last control commands (tail) --"
+    echo "-- 最近控制命令 (tail) --"
     tail -n 10 "$CONTROL_FILE" 2>/dev/null || true
     pause
 }
 
 tail_logs() {
-    echo "======== LOG (tail -n 60) ========"
+    echo "======== 日志 (tail -n 60) ========"
     tail -n 60 "$LOG_FILE" 2>/dev/null || true
+    pause
+}
+
+clear_control_queue() {
+    : > "$CONTROL_FILE"
+    printf '0\n' > "$CONTROL_SEQ_FILE"
+    write_state LAST_ACTION "clear_control_queue"
+    log "[+] 已清空控制命令队列"
     pause
 }
 
@@ -371,30 +504,38 @@ menu_loop() {
         show_header
         echo "1) 选择驱动模式"
         echo "2) 设置核心路径"
-        echo "3) 查询一次游戏PID"
-        echo "4) 等待游戏PID"
-        echo "5) 启动核心"
-        echo "6) 初始化绘制 (占位)"
-        echo "7) 停止绘制 (占位)"
-        echo "8) 停止核心"
-        echo "9) 切换自动初始化绘制"
-        echo "10) 查看状态"
-        echo "11) 查看日志"
+        echo "3) 设置游戏包名"
+        echo "4) 设置日志级别"
+        echo "5) 设置额外启动参数"
+        echo "6) 查询一次游戏PID"
+        echo "7) 等待游戏PID"
+        echo "8) 启动核心"
+        echo "9) 初始化绘制 (阶段1队列)"
+        echo "10) 停止绘制 (阶段1队列)"
+        echo "11) 停止核心"
+        echo "12) 切换自动初始化绘制"
+        echo "13) 查看状态"
+        echo "14) 查看日志"
+        echo "15) 清空控制命令队列"
         echo "0) 退出"
         printf "\n请输入选项: "
         read op || exit 0
         case "$op" in
             1) select_driver ;;
             2) set_core_bin ;;
-            3) show_game_pid_once ;;
-            4) wait_game_pid ;;
-            5) start_core ;;
-            6) init_draw ;;
-            7) stop_draw ;;
-            8) stop_core ;;
-            9) toggle_auto_init_draw ;;
-            10) show_status ;;
-            11) tail_logs ;;
+            3) set_game_pkg ;;
+            4) set_log_level ;;
+            5) set_extra_args ;;
+            6) show_game_pid_once ;;
+            7) wait_game_pid ;;
+            8) start_core ;;
+            9) init_draw ;;
+            10) stop_draw ;;
+            11) stop_core ;;
+            12) toggle_auto_init_draw ;;
+            13) show_status ;;
+            14) tail_logs ;;
+            15) clear_control_queue ;;
             0) exit 0 ;;
             *) log "[!] 无效选项"; pause ;;
         esac
@@ -402,4 +543,3 @@ menu_loop() {
 }
 
 menu_loop
-
