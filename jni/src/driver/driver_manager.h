@@ -22,7 +22,7 @@ public:
 
         // 优先级 1: QX 内核驱动 (ioctl 0x801/0x802)
         try {
-            auto* drv = new driver_qx();
+            auto* drv = new qx_driver();
             printf("[DriverManager] ✓ QX驱动加载成功\n");
             return drv;
         } catch (...) {
@@ -31,7 +31,7 @@ public:
 
         // 优先级 2: RT Dev驱动 (/dev 6字母节点)
         try {
-            auto* drv = new driver_dev();
+            auto* drv = new dev_driver();
             printf("[DriverManager] ✓ Dev驱动加载成功\n");
             return drv;
         } catch (...) {
@@ -40,7 +40,7 @@ public:
 
         // 优先级 3: GT2.0 Proc驱动 (/proc 6字母节点)
         try {
-            auto* drv = new driver_proc();
+            auto* drv = new proc_driver();
             printf("[DriverManager] ✓ Proc驱动加载成功\n");
             return drv;
         } catch (...) {
@@ -49,7 +49,7 @@ public:
 
         // 优先级 4: RT HookPro驱动 (AF_INET SOCK_DGRAM ioctl)
         try {
-            auto* drv = new driver_rt_hookpro();
+            auto* drv = new rt_hookpro_driver();
             printf("[DriverManager] ✓ RT_HookPro驱动加载成功\n");
             return drv;
         } catch (...) {
@@ -58,7 +58,7 @@ public:
 
         // 优先级 5: Dit 3.3 (Netlink socket)
         try {
-            auto* drv = new driver_dit();
+            auto* drv = new dit_driver();
             printf("[DriverManager] ✓ Dit驱动加载成功\n");
             return drv;
         } catch (...) {
@@ -67,7 +67,7 @@ public:
 
         // 优先级 6: DitPro (syscall hook)
         try {
-            auto* drv = new driver_ditpro();
+            auto* drv = new ditpro_driver();
             printf("[DriverManager] ✓ DitPro驱动加载成功\n");
             return drv;
         } catch (...) {
@@ -76,7 +76,7 @@ public:
 
         // 优先级 7: pread64 (/proc/pid/mem) — 需root但无需内核驱动
         try {
-            auto* drv = new driver_pread();
+            auto* drv = new pread_driver();
             printf("[DriverManager] ✓ Pread驱动加载成功\n");
             return drv;
         } catch (...) {
@@ -85,7 +85,7 @@ public:
 
         // 优先级 8: process_vm_readv/writev (最基础的方式)
         try {
-            auto* drv = new driver_syscall();
+            auto* drv = new syscall_driver();
             printf("[DriverManager] ✓ Syscall驱动加载成功\n");
             return drv;
         } catch (...) {
