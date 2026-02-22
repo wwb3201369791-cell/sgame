@@ -129,22 +129,35 @@ bool overlay_init(int width, int height) {
     };
     bool fontLoaded = false;
     const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+    const float fontSizes[] = { 26.0f, 22.0f, 18.0f };
     for (auto path : fontPaths) {
-        if (access(path, R_OK) == 0) {
-            ImFont* font = io.Fonts->AddFontFromFileTTF(path, 26.0f, &fontCfg, glyphRanges);
-            if (font) {
-                fontLoaded = true;
-                printf("[Overlay] ✓ 字体加载: %s (ChineseSimplifiedCommon, 26px)\n", path);
-                break;
+        if (access(path, R_OK) != 0) continue;
+
+        for (float size : fontSizes) {
+            io.Fonts->Clear();
+            ImFont* font = io.Fonts->AddFontFromFileTTF(path, size, &fontCfg, glyphRanges);
+            if (!font) {
+                printf("[Overlay] ⚠ 字体加入失败: %s (%.0fpx)\n", path, size);
+                continue;
             }
+            if (!io.Fonts->Build()) {
+                printf("[Overlay] ⚠ 字体图集构建失败: %s (ChineseSimplifiedCommon, %.0fpx), 尝试降级\n", path, size);
+                continue;
+            }
+
+            fontLoaded = true;
+            printf("[Overlay] ✓ 字体加载: %s (ChineseSimplifiedCommon, %.0fpx)\n", path, size);
+            break;
         }
+        if (fontLoaded) break;
     }
     if (!fontLoaded) {
+        io.Fonts->Clear();
         io.Fonts->AddFontDefault();
-        printf("[Overlay] ⚠ 使用默认字体\n");
-    }
-    if (!io.Fonts->Build()) {
-        return fail("字体图集构建失败");
+        if (!io.Fonts->Build()) {
+            return fail("默认字体图集构建失败");
+        }
+        printf("[Overlay] ⚠ 使用默认字体 (中文可能显示不全)\n");
     }
 
     // 5. 应用自定义主题 (淡白·柔粉·暖黄)
