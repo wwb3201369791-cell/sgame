@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <unistd.h>
 #include <dirent.h>
 
@@ -19,7 +20,13 @@ inline uintptr_t g_mem_last_fail_addr = 0;
 
 // 初始化驱动 (自动检测)
 inline bool init_driver() {
-    g_driver = DriverManager::auto_detect();
+    const char* forced_mode = getenv("SGAME_DRIVER");
+    if (forced_mode && *forced_mode) {
+        printf("[Driver] SGAME_DRIVER=%s\n", forced_mode);
+        g_driver = DriverManager::detect_by_mode(forced_mode);
+    } else {
+        g_driver = DriverManager::auto_detect();
+    }
     return g_driver != nullptr;
 }
 

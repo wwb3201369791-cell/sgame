@@ -5,6 +5,7 @@
 #include <time.h>
 #include <signal.h>
 #include <inttypes.h>
+#include <ctype.h>
 
 // 模块头文件
 #include "stealth/stealth.h"
@@ -22,9 +23,260 @@
 // 哈皮哈啤哈屁 — 王者荣耀视野共享工具
 // ============================================================
 
-static const char* GAME_PACKAGE = "com.tencent.tmgp.sgame";
+static char g_gamePackage[128] = "com.tencent.tmgp.sgame";
 static volatile int g_loopCount = 0;
 static const char* g_phase = "初始化";
+static bool g_drawEnabled = true;
+static char g_controlFile[256] = {0};
+static char g_controlAckFile[256] = {0};
+static unsigned long long g_controlLastSeq = 0;
+static bool g_controlEnabled = false;
+static pid_t g_gamePidHint = 0;
+
+static void copy_str(char* dst, size_t dstSize, const char* src) {
+    if (!dst || dstSize == 0) return;
+    if (!src) src = "";
+    snprintf(dst, dstSize, "%s", src);
+}
+
+static bool str_is_true(const char* s) {
+    if (!s || !*s) return false;
+    return strcmp(s, "1") == 0 || strcmp(s, "true") == 0 || strcmp(s, "TRUE") == 0 ||
+           strcmp(s, "yes") == 0 || strcmp(s, "YES") == 0 || strcmp(s, "on") == 0 ||
+           strcmp(s, "ON") == 0;
+}
+
+static bool str_is_false(const char* s) {
+    if (!s || !*s) return false;
+    return strcmp(s, "0") == 0 || strcmp(s, "false") == 0 || strcmp(s, "FALSE") == 0 ||
+           strcmp(s, "no") == 0 || strcmp(s, "NO") == 0 || strcmp(s, "off") == 0 ||
+           strcmp(s, "OFF") == 0;
+}
+
+static void trim_line(char* s) {
+    if (!s) return;
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t')) {
+        s[--n] = '\0';
+    }
+    size_t start = 0;
+    while (s[start] == ' ' || s[start] == '\t') start++;
+    if (start > 0) memmove(s, s + start, strlen(s + start) + 1);
+}
+
+static const char* now_str() {
+    static char buf[32];
+    time_t t = time(nullptr);
+    struct tm tmv;
+    memset(&tmv, 0, sizeof(tmv));
+#if defined(_WIN32)
+    localtime_s(&tmv, &t);
+#else
+    localtime_r(&t, &tmv);
+#endif
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+    return buf;
+}
+
+static void control_ack(unsigned long long seq, const char* status, const char* detail) {
+    if (g_controlAckFile[0] == '\0') return;
+    FILE* f = fopen(g_controlAckFile, "a");
+    if (!f) return;
+    fprintf(f, "%llu|%s|%s|%s\n",
+            seq,
+            now_str(),
+            status ? status : "OK",
+            detail ? detail : "");
+    fclose(f);
+}
+
+static void runtime_load_env() {
+    const char* gamePkg = getenv("SGAME_GAME_PKG");
+    if (gamePkg && *gamePkg) {
+        copy_str(g_gamePackage, sizeof(g_gamePackage), gamePkg);
+        printf("[Runtime] 使用环境变量游戏包名: %s\n", g_gamePackage);
+    }
+
+    const char* ctrlFile = getenv("SGAME_CONTROL_FILE");
+    if (ctrlFile && *ctrlFile) {
+        copy_str(g_controlFile, sizeof(g_controlFile), ctrlFile);
+        g_controlEnabled = true;
+
+        const char* ackFile = getenv("SGAME_CONTROL_ACK_FILE");
+        if (ackFile && *ackFile) {
+            copy_str(g_controlAckFile, sizeof(g_controlAckFile), ackFile);
+        } else {
+            snprintf(g_controlAckFile, sizeof(g_controlAckFile), "%s.ack", g_controlFile);
+        }
+        printf("[Control] 控制队列启用: %s\n", g_controlFile);
+        printf("[Control] ACK文件: %s\n", g_controlAckFile);
+    }
+
+    const char* drawDefault = getenv("SGAME_DRAW_DEFAULT");
+    if (drawDefault && *drawDefault) {
+        if (str_is_false(drawDefault)) g_drawEnabled = false;
+        if (str_is_true(drawDefault)) g_drawEnabled = true;
+        printf("[Control] 初始绘制状态: %s (SGAME_DRAW_DEFAULT=%s)\n",
+               g_drawEnabled ? "ON" : "OFF", drawDefault);
+    }
+
+    const char* pidHint = getenv("SGAME_GAME_PID");
+    if (pidHint && *pidHint) {
+        char* endp = nullptr;
+        long v = strtol(pidHint, &endp, 10);
+        if (endp && *endp == '\0' && v > 0) {
+            g_gamePidHint = (pid_t)v;
+            printf("[Runtime] 游戏PID提示: %d\n", (int)g_gamePidHint);
+        }
+    }
+}
+
+static bool control_parse_line(char* line,
+                               unsigned long long fallbackSeq,
+                               unsigned long long* outSeq,
+                               char* outCmd,
+                               size_t outCmdSize) {
+    if (!line || !outSeq || !outCmd || outCmdSize == 0) return false;
+    trim_line(line);
+    if (line[0] == '\0') return false;
+
+    // 新格式: SEQ|TIMESTAMP|CMD
+    char* p1 = strchr(line, '|');
+    if (p1) {
+        char* p2 = strchr(p1 + 1, '|');
+        if (p2) {
+            *p1 = '\0';
+            *p2 = '\0';
+            char* endp = nullptr;
+            unsigned long long seq = strtoull(line, &endp, 10);
+            if (endp && *endp == '\0') {
+                *outSeq = seq;
+                copy_str(outCmd, outCmdSize, p2 + 1);
+                trim_line(outCmd);
+                return outCmd[0] != '\0';
+            }
+        }
+    }
+
+    // 兼容旧格式: CMD
+    *outSeq = fallbackSeq;
+    copy_str(outCmd, outCmdSize, line);
+    trim_line(outCmd);
+    return outCmd[0] != '\0';
+}
+
+static void control_exec_command(unsigned long long seq, const char* cmdline) {
+    if (!cmdline || !*cmdline) return;
+
+    char buf[256];
+    copy_str(buf, sizeof(buf), cmdline);
+    trim_line(buf);
+
+    char* cmd = buf;
+    while (*cmd == ' ' || *cmd == '\t') cmd++;
+    char* arg = cmd;
+    while (*arg && *arg != ' ' && *arg != '\t') arg++;
+    if (*arg) {
+        *arg = '\0';
+        arg++;
+        while (*arg == ' ' || *arg == '\t') arg++;
+    } else {
+        arg = (char*)"";
+    }
+
+    if (strcmp(cmd, "PING") == 0) {
+        printf("[Control] seq=%llu PING -> PONG\n", seq);
+        control_ack(seq, "OK", "PONG");
+        return;
+    }
+    if (strcmp(cmd, "INIT_DRAW") == 0) {
+        g_drawEnabled = true;
+        printf("[Control] seq=%llu INIT_DRAW -> DRAW_ON\n", seq);
+        control_ack(seq, "OK", "DRAW_ON");
+        return;
+    }
+    if (strcmp(cmd, "STOP_DRAW") == 0) {
+        g_drawEnabled = false;
+        g_config.showMenu = false;
+        printf("[Control] seq=%llu STOP_DRAW -> DRAW_OFF\n", seq);
+        control_ack(seq, "OK", "DRAW_OFF");
+        return;
+    }
+    if (strcmp(cmd, "EXIT") == 0) {
+        g_config.showMenu = false;
+        g_exitRequested = true;
+        printf("[Control] seq=%llu EXIT -> EXITING\n", seq);
+        control_ack(seq, "OK", "EXITING");
+        return;
+    }
+    if (strcmp(cmd, "SET_LOG_LEVEL") == 0) {
+        printf("[Control] seq=%llu SET_LOG_LEVEL %s (当前版本仅记录)\n", seq, arg);
+        control_ack(seq, "OK", "SET_LOG_LEVEL_QUEUED");
+        return;
+    }
+
+    printf("[Control] seq=%llu 未支持命令: %s\n", seq, cmdline);
+    control_ack(seq, "ERR", "UNSUPPORTED_COMMAND");
+}
+
+static void control_poll_file_once(bool allowResetRetry) {
+    if (!g_controlEnabled || g_controlFile[0] == '\0') return;
+
+    FILE* f = fopen(g_controlFile, "r");
+    if (!f) return;
+
+    char line[512];
+    unsigned long long lineNo = 0;
+    unsigned long long maxSeq = 0;
+    while (fgets(line, sizeof(line), f)) {
+        lineNo++;
+        unsigned long long seq = 0;
+        char cmd[256];
+        if (!control_parse_line(line, lineNo, &seq, cmd, sizeof(cmd))) {
+            continue;
+        }
+        if (seq > maxSeq) maxSeq = seq;
+        if (seq <= g_controlLastSeq) {
+            continue;
+        }
+        control_exec_command(seq, cmd);
+        g_controlLastSeq = seq;
+    }
+    fclose(f);
+
+    if (allowResetRetry && maxSeq < g_controlLastSeq) {
+        // 队列可能被清空并重置序号；回退一次重新读取，避免新命令被永久忽略。
+        printf("[Control] 检测到队列重置 (maxSeq=%llu < lastSeq=%llu), 重新同步\n",
+               maxSeq, g_controlLastSeq);
+        g_controlLastSeq = 0;
+        control_poll_file_once(false);
+    }
+}
+
+static void control_init_baseline() {
+    if (!g_controlEnabled || g_controlFile[0] == '\0') return;
+
+    FILE* f = fopen(g_controlFile, "r");
+    if (!f) return;
+
+    char line[512];
+    unsigned long long lineNo = 0;
+    unsigned long long maxSeq = 0;
+    while (fgets(line, sizeof(line), f)) {
+        lineNo++;
+        unsigned long long seq = 0;
+        char cmd[256];
+        if (!control_parse_line(line, lineNo, &seq, cmd, sizeof(cmd))) {
+            continue;
+        }
+        if (seq > maxSeq) maxSeq = seq;
+    }
+    fclose(f);
+
+    g_controlLastSeq = maxSeq;
+    printf("[Control] 初始队列基线 seq=%llu\n", g_controlLastSeq);
+    control_ack(g_controlLastSeq, "OK", g_drawEnabled ? "BOOT_DRAW_ON" : "BOOT_DRAW_OFF");
+}
 
 static void crash_handler(int sig) {
     const char* name = (sig == SIGSEGV) ? "SIGSEGV" :
@@ -103,6 +355,8 @@ int main(int argc, char** argv) {
     signal(SIGBUS, crash_handler);
     signal(SIGABRT, crash_handler);
 
+    runtime_load_env();
+
     printf("========================================\n");
     printf("  哈皮哈啤哈屁 v1.0\n");
     printf("  王者荣耀视野共享工具\n");
@@ -120,9 +374,17 @@ int main(int argc, char** argv) {
     printf("[✓] 驱动初始化完成\n");
 
     // ===== Step 3: 等待游戏进程 =====
-    printf("[...] 等待游戏 (%s)...\n", GAME_PACKAGE);
+    printf("[...] 等待游戏 (%s)...\n", g_gamePackage);
     pid_t pid = 0;
-    while ((pid = get_game_pid(GAME_PACKAGE)) <= 0) {
+    if (g_gamePidHint > 0 && kill(g_gamePidHint, 0) == 0) {
+        pid = g_gamePidHint;
+        g_game_pid = pid;
+        if (g_driver) g_driver->set_pid(pid);
+        printf("[✓] 使用环境变量提供的游戏PID: %d\n", pid);
+    }
+    while (pid <= 0) {
+        pid = get_game_pid(g_gamePackage);
+        if (pid > 0) break;
         sleep(1);
     }
     printf("[✓] 游戏PID: %d\n", pid);
@@ -164,6 +426,7 @@ int main(int argc, char** argv) {
     // ===== Step 6: 网络模块 (可选) =====
     NetServer server;
     NetClient client;
+    control_init_baseline();
 
     // ===== Step 7: 主循环 =====
     printf("[✓] 进入主循环 (60FPS)\n");
@@ -171,6 +434,11 @@ int main(int argc, char** argv) {
 
     while (true) {
         g_loopCount++;
+
+        if ((g_loopCount % 6) == 1) {
+            g_phase = "control_poll";
+            control_poll_file_once(true);
+        }
 
         // 动态刷新触摸方向和备用映射（处理旋转/机型差异）
         static int lastTouchOrientation = -1;
@@ -243,18 +511,20 @@ int main(int argc, char** argv) {
         overlay_begin();
 
         // 4. 绘制游戏数据
-        if (gs.inMatch) {
+        if (g_drawEnabled && gs.inMatch) {
             g_phase = "Render::DrawAll";
             Render::DrawAll(gs);
         }
 
         // 5. 绘制UI
-        g_phase = "DrawFloatingBall";
-        DrawFloatingBall();
-        g_phase = "DrawMenu";
-        DrawMenu();
-        g_phase = "DebugHUD";
-        DrawDebugHUD(reader);
+        if (g_drawEnabled) {
+            g_phase = "DrawFloatingBall";
+            DrawFloatingBall();
+            g_phase = "DrawMenu";
+            DrawMenu();
+            g_phase = "DebugHUD";
+            DrawDebugHUD(reader);
+        }
 
         // 6. 结束渲染帧
         g_phase = "overlay_end";

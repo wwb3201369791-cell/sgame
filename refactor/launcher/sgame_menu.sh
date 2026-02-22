@@ -16,12 +16,14 @@ PID_FILE="$RUNTIME_DIR/core.pid"
 LOG_FILE="$LOG_DIR/core.log"
 CONTROL_FILE="$RUNTIME_DIR/control.cmd"
 CONTROL_SEQ_FILE="$RUNTIME_DIR/control.seq"
+CONTROL_ACK_FILE="$RUNTIME_DIR/control.ack"
 
 mkdir -p "$CONF_DIR" "$RUNTIME_DIR" "$LOG_DIR"
 [ -f "$STATE_FILE" ] || : > "$STATE_FILE"
 [ -f "$LOG_FILE" ] || : > "$LOG_FILE"
 [ -f "$CONTROL_FILE" ] || : > "$CONTROL_FILE"
 [ -f "$CONTROL_SEQ_FILE" ] || printf '0\n' > "$CONTROL_SEQ_FILE"
+[ -f "$CONTROL_ACK_FILE" ] || : > "$CONTROL_ACK_FILE"
 
 log() {
     printf '%s\n' "$*"
@@ -195,6 +197,7 @@ show_header() {
     echo "自动初始化绘制 : $AUTO_INIT_DRAW"
     echo "绘制请求状态   : $draw_req"
     echo "日志文件       : $LOG_FILE"
+    echo "控制ACK文件    : $CONTROL_ACK_FILE"
     echo "----------------------------------------"
 }
 
@@ -352,6 +355,8 @@ start_core() {
         export SGAME_GAME_PKG="$GAME_PKG"
         export SGAME_LOG_LEVEL="$LOG_LEVEL"
         export SGAME_CONTROL_FILE="$CONTROL_FILE"
+        export SGAME_CONTROL_ACK_FILE="$CONTROL_ACK_FILE"
+        export SGAME_DRAW_DEFAULT=0
         if [ -n "${game_pid:-}" ]; then
             export SGAME_GAME_PID="$game_pid"
         fi
@@ -383,7 +388,7 @@ start_core() {
     if [ "$AUTO_INIT_DRAW" = "1" ]; then
         append_control_cmd "INIT_DRAW"
         write_state DRAW_REQUESTED 1
-        log "[i] AUTO_INIT_DRAW=1, 已写入 INIT_DRAW (阶段1队列命令)"
+        log "[i] AUTO_INIT_DRAW=1, 已写入 INIT_DRAW (实时控制队列)"
     fi
 
     pause
@@ -418,12 +423,11 @@ stop_core() {
 }
 
 init_draw() {
-    # Phase-1 placeholder: keep operator workflow stable before control IPC exists.
     append_control_cmd "INIT_DRAW"
     write_state DRAW_REQUESTED 1
     write_state LAST_ACTION "init_draw"
-    log "[i] 已记录 INIT_DRAW 命令（阶段1队列）。"
-    log "    等核心接入 control endpoint 后会变为实时控制。"
+    log "[i] 已写入 INIT_DRAW 命令（实时控制队列）。"
+    log "    若核心已接入M2控制通道，将在运行中立即生效。"
     pause
 }
 
@@ -431,7 +435,7 @@ stop_draw() {
     append_control_cmd "STOP_DRAW"
     write_state DRAW_REQUESTED 0
     write_state LAST_ACTION "stop_draw"
-    log "[i] 已记录 STOP_DRAW 命令（阶段1队列）。"
+    log "[i] 已写入 STOP_DRAW 命令（实时控制队列）。"
     pause
 }
 
@@ -482,6 +486,9 @@ show_status() {
     echo
     echo "-- 最近控制命令 (tail) --"
     tail -n 10 "$CONTROL_FILE" 2>/dev/null || true
+    echo
+    echo "-- 控制结果ACK (tail) --"
+    tail -n 10 "$CONTROL_ACK_FILE" 2>/dev/null || true
     pause
 }
 
@@ -494,8 +501,9 @@ tail_logs() {
 clear_control_queue() {
     : > "$CONTROL_FILE"
     printf '0\n' > "$CONTROL_SEQ_FILE"
+    : > "$CONTROL_ACK_FILE"
     write_state LAST_ACTION "clear_control_queue"
-    log "[+] 已清空控制命令队列"
+    log "[+] 已清空控制命令队列与ACK"
     pause
 }
 
@@ -510,8 +518,8 @@ menu_loop() {
         echo "6) 查询一次游戏PID"
         echo "7) 等待游戏PID"
         echo "8) 启动核心"
-        echo "9) 初始化绘制 (阶段1队列)"
-        echo "10) 停止绘制 (阶段1队列)"
+        echo "9) 初始化绘制 (实时控制)"
+        echo "10) 停止绘制 (实时控制)"
         echo "11) 停止核心"
         echo "12) 切换自动初始化绘制"
         echo "13) 查看状态"
