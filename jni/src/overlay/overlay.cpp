@@ -15,8 +15,48 @@ static EGLContext g_context = EGL_NO_CONTEXT;
 static ANativeWindow* g_window = nullptr;
 static int g_window_width = 0;
 static int g_window_height = 0;
+static bool g_imgui_android_inited = false;
+static bool g_imgui_gl3_inited = false;
+
+static void overlay_cleanup_egl() {
+    if (g_display != EGL_NO_DISPLAY) {
+        eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        if (g_surface != EGL_NO_SURFACE) {
+            eglDestroySurface(g_display, g_surface);
+            g_surface = EGL_NO_SURFACE;
+        }
+        if (g_context != EGL_NO_CONTEXT) {
+            eglDestroyContext(g_display, g_context);
+            g_context = EGL_NO_CONTEXT;
+        }
+        eglTerminate(g_display);
+        g_display = EGL_NO_DISPLAY;
+    }
+}
 
 bool overlay_init(int width, int height) {
+    auto fail = [](const char* msg) -> bool {
+        printf("[Overlay] ✗ %s\n", msg);
+        ImGuiContext* ctx = ImGui::GetCurrentContext();
+        if (ctx) {
+            if (g_imgui_gl3_inited) {
+                ImGui_ImplOpenGL3_Shutdown();
+                g_imgui_gl3_inited = false;
+            }
+            if (g_imgui_android_inited) {
+                ImGui_ImplAndroid_Shutdown();
+                g_imgui_android_inited = false;
+            }
+            ImGui::DestroyContext();
+        }
+        overlay_cleanup_egl();
+        if (g_window) {
+            android::ANativeWindowCreator::Destroy(g_window);
+            g_window = nullptr;
+        }
+        return false;
+    };
+
     // 1. 创建 ANativeWindow (透明, 最顶层, 全屏)
     g_window = android::ANativeWindowCreator::Create("hphphp-overlay", width, height);
     if (!g_window) {
@@ -28,7 +68,12 @@ bool overlay_init(int width, int height) {
 
     // 2. EGL 初始化
     g_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    eglInitialize(g_display, nullptr, nullptr);
+    if (g_display == EGL_NO_DISPLAY) {
+        return fail("eglGetDisplay 失败");
+    }
+    if (eglInitialize(g_display, nullptr, nullptr) != EGL_TRUE) {
+        return fail("eglInitialize 失败");
+    }
 
     // 关键: EGL_ALPHA_SIZE=8 让覆盖层支持透明
     EGLint configAttribs[] = {
@@ -42,14 +87,24 @@ bool overlay_init(int width, int height) {
     };
     EGLConfig config;
     EGLint numConfigs;
-    eglChooseConfig(g_display, configAttribs, &config, 1, &numConfigs);
+    if (eglChooseConfig(g_display, configAttribs, &config, 1, &numConfigs) != EGL_TRUE || numConfigs <= 0) {
+        return fail("eglChooseConfig 失败");
+    }
 
     g_surface = eglCreateWindowSurface(g_display, config, g_window, nullptr);
+    if (g_surface == EGL_NO_SURFACE) {
+        return fail("eglCreateWindowSurface 失败");
+    }
 
     EGLint contextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
     g_context = eglCreateContext(g_display, config, EGL_NO_CONTEXT, contextAttribs);
+    if (g_context == EGL_NO_CONTEXT) {
+        return fail("eglCreateContext 失败");
+    }
 
-    eglMakeCurrent(g_display, g_surface, g_surface, g_context);
+    if (eglMakeCurrent(g_display, g_surface, g_surface, g_context) != EGL_TRUE) {
+        return fail("eglMakeCurrent 失败");
+    }
 
     // 3. ImGui 初始化
     IMGUI_CHECKVERSION();
@@ -90,8 +145,14 @@ bool overlay_init(int width, int height) {
     ApplyHPHPTheme();
 
     // 6. 初始化后端
-    ImGui_ImplAndroid_Init(g_window);
-    ImGui_ImplOpenGL3_Init("#version 300 es");
+    if (!ImGui_ImplAndroid_Init(g_window)) {
+        return fail("ImGui_ImplAndroid_Init 失败");
+    }
+    g_imgui_android_inited = true;
+    if (!ImGui_ImplOpenGL3_Init("#version 300 es")) {
+        return fail("ImGui_ImplOpenGL3_Init 失败");
+    }
+    g_imgui_gl3_inited = true;
 
     // 7. 开启混合 (透明渲染必需)
     glEnable(GL_BLEND);
@@ -114,22 +175,29 @@ void overlay_begin() {
 void overlay_end() {
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-    eglSwapBuffers(g_display, g_surface);
+    if (g_display != EGL_NO_DISPLAY && g_surface != EGL_NO_SURFACE) {
+        eglSwapBuffers(g_display, g_surface);
+    }
 }
 
 void overlay_destroy() {
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplAndroid_Shutdown();
-    ImGui::DestroyContext();
-
-    if (g_display != EGL_NO_DISPLAY) {
-        eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        if (g_surface != EGL_NO_SURFACE) eglDestroySurface(g_display, g_surface);
-        if (g_context != EGL_NO_CONTEXT) eglDestroyContext(g_display, g_context);
-        eglTerminate(g_display);
+    if (g_imgui_gl3_inited) {
+        ImGui_ImplOpenGL3_Shutdown();
+        g_imgui_gl3_inited = false;
     }
+    if (g_imgui_android_inited) {
+        ImGui_ImplAndroid_Shutdown();
+        g_imgui_android_inited = false;
+    }
+    if (ImGui::GetCurrentContext()) {
+        ImGui::DestroyContext();
+    }
+
+    overlay_cleanup_egl();
     if (g_window) {
         android::ANativeWindowCreator::Destroy(g_window);
         g_window = nullptr;
     }
+    g_window_width = 0;
+    g_window_height = 0;
 }

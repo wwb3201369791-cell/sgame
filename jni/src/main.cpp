@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 // 模块头文件
 #include "stealth/stealth.h"
@@ -101,18 +102,41 @@ int main(int argc, char** argv) {
         reader.Update();
 
         // 2. 如果启用网络
+        static time_t lastClientConnectTry = 0;
         if (g_config.netEnabled) {
             if (g_config.isServer) {
+                // 切换到服务端模式时，关闭客户端连接
+                if (client.connected || client.sockFd >= 0) {
+                    client.Disconnect();
+                }
+
                 // 服务端: 发送数据
                 if (server.serverFd < 0) {
                     server.Start(g_config.serverPort);
                 }
                 server.Send(reader.state);
             } else {
+                // 切换到客户端模式时，关闭服务端监听
+                if (server.serverFd >= 0 || server.running) {
+                    server.Stop();
+                }
+
                 // 客户端: 接收数据 (覆盖本地数据)
                 if (!client.connected) {
-                    client.Connect(g_config.serverIP, g_config.serverPort);
+                    time_t now = time(nullptr);
+                    if (now - lastClientConnectTry >= 2) {
+                        lastClientConnectTry = now;
+                        client.Connect(g_config.serverIP, g_config.serverPort);
+                    }
                 }
+            }
+        } else {
+            // 网络关闭时释放连接/监听，避免后台占用端口
+            if (server.serverFd >= 0 || server.running) {
+                server.Stop();
+            }
+            if (client.connected || client.sockFd >= 0) {
+                client.Disconnect();
             }
         }
 
