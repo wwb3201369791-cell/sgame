@@ -13,14 +13,18 @@ static EGLDisplay g_display = EGL_NO_DISPLAY;
 static EGLSurface g_surface = EGL_NO_SURFACE;
 static EGLContext g_context = EGL_NO_CONTEXT;
 static ANativeWindow* g_window = nullptr;
+static int g_window_width = 0;
+static int g_window_height = 0;
 
 bool overlay_init(int width, int height) {
     // 1. 创建 ANativeWindow (透明, 最顶层, 全屏)
-    g_window = ANativeWindowCreator::Create(width, height);
+    g_window = android::ANativeWindowCreator::Create("hphphp-overlay", width, height);
     if (!g_window) {
         printf("[Overlay] ✗ 无法创建ANativeWindow\n");
         return false;
     }
+    g_window_width = width;
+    g_window_height = height;
 
     // 2. EGL 初始化
     g_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -103,7 +107,7 @@ void overlay_begin() {
     glClear(GL_COLOR_BUFFER_BIT);
 
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplAndroid_NewFrame();
+    ImGui_ImplAndroid_NewFrame(g_window_width, g_window_height);
     ImGui::NewFrame();
 }
 
@@ -124,5 +128,8 @@ void overlay_destroy() {
         if (g_context != EGL_NO_CONTEXT) eglDestroyContext(g_display, g_context);
         eglTerminate(g_display);
     }
-    if (g_window) ANativeWindow_release(g_window);
+    if (g_window) {
+        android::ANativeWindowCreator::Destroy(g_window);
+        g_window = nullptr;
+    }
 }
