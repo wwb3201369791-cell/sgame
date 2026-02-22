@@ -150,22 +150,29 @@ bool overlay_init(int width, int height) {
     for (auto path : fontPaths) {
         if (access(path, R_OK) != 0) continue;
 
-        for (float size : fontSizes) {
-            io.Fonts->Clear();
-            ImFont* font = io.Fonts->AddFontFromFileTTF(path, size, &fontCfg, glyphRanges);
-            if (!font) {
-                printf("[Overlay] ⚠ 字体加入失败: %s (%.0fpx)\n", path, size);
-                continue;
-            }
-            if (!io.Fonts->Build()) {
-                printf("[Overlay] ⚠ 字体图集构建失败: %s (custom CJK subset, %.0fpx), 尝试降级\n", path, size);
-                continue;
-            }
+        int maxFontNo = (strstr(path, ".ttc") != nullptr) ? 5 : 0;
+        for (int fontNo = 0; fontNo <= maxFontNo && !fontLoaded; ++fontNo) {
+            for (float size : fontSizes) {
+                io.Fonts->Clear();
+                ImFontConfig cfg = fontCfg;
+                cfg.FontNo = fontNo;
+                ImFont* font = io.Fonts->AddFontFromFileTTF(path, size, &cfg, glyphRanges);
+                if (!font) {
+                    printf("[Overlay] ⚠ 字体加入失败: %s (fontNo=%d, %.0fpx)\n", path, fontNo, size);
+                    continue;
+                }
+                if (!io.Fonts->Build()) {
+                    printf("[Overlay] ⚠ 字体图集构建失败: %s (fontNo=%d, custom CJK subset, %.0fpx), 尝试降级\n",
+                           path, fontNo, size);
+                    continue;
+                }
 
-            fontLoaded = true;
-            g_has_cjk_font = (strstr(path, "Roboto") == nullptr);
-            printf("[Overlay] ✓ 字体加载: %s (custom CJK subset, %.0fpx)\n", path, size);
-            break;
+                fontLoaded = true;
+                g_has_cjk_font = (strstr(path, "Roboto") == nullptr);
+                printf("[Overlay] ✓ 字体加载: %s (fontNo=%d, custom CJK subset, %.0fpx)\n",
+                       path, fontNo, size);
+                break;
+            }
         }
         if (fontLoaded) break;
     }
