@@ -13,6 +13,7 @@
 #include "overlay/menu.h"
 #include "render/render.h"
 #include "net/net.h"
+#include "Android_touch/TouchHelperA.h"
 
 // ============================================================
 // 哈皮哈啤哈屁 — 王者荣耀视野共享工具
@@ -105,6 +106,13 @@ int main(int argc, char** argv) {
     }
     printf("[✓] EGL覆盖层初始化完成\n");
 
+    // ===== Step 5.1: 触摸输入 (用于悬浮球/菜单交互, 只读不抢占游戏触摸) =====
+    if (Touch::Init({(float)screenW, (float)screenH}, true)) {
+        printf("[✓] 触摸输入初始化完成 (只读模式)\n");
+    } else {
+        printf("[!] 触摸输入初始化失败 (悬浮球不可交互)\n");
+    }
+
     // ===== Step 6: 网络模块 (可选) =====
     NetServer server;
     NetClient client;
@@ -191,6 +199,7 @@ int main(int argc, char** argv) {
 
     // 清理
     overlay_destroy();
+    Touch::Close();
     server.Stop();
     client.Disconnect();
 
