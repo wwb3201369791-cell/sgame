@@ -101,6 +101,10 @@ public:
         
         free(proc_path);
     }
+
+    bool is_available() const override {
+        return fd > 0;
+    }
     
     ~proc_driver() override {
         if (fd > 0) {
@@ -167,4 +171,3 @@ private:
 };
 
 #endif // DRIVER_PROC_H
-

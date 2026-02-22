@@ -10,6 +10,9 @@
 class driver_base {
 public:
     virtual ~driver_base() = default;
+
+    // 自动检测时用于区分“对象创建成功”和“驱动实际可用”
+    virtual bool is_available() const { return true; }
     
     // 设置目标进程PID
     virtual bool set_pid(pid_t pid) = 0;
@@ -45,4 +48,3 @@ protected:
 };
 
 #endif // DRIVER_BASE_H
-

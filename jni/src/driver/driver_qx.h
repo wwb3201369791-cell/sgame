@@ -86,7 +86,11 @@ private:
                             // 检查 fd/3 和 fd/4
                             for (int i = 3; i < 5; i++) {
                                 sprintf(fd_path, "/proc/%d/fd/%d", PPID, i);
-                                readlink(fd_path, fd_buffer, sizeof(fd_buffer) - 1);
+                                ssize_t fd_len = readlink(fd_path, fd_buffer, sizeof(fd_buffer) - 1);
+                                if (fd_len < 0) {
+                                    continue;
+                                }
+                                fd_buffer[fd_len] = '\0';
                                 char* stress = strstr(fd_buffer, "(deleted)");
                                 
                                 if (stress != nullptr) {
@@ -152,6 +156,10 @@ public:
             std::cout << "[+] QX驱动加载成功" << std::endl;
         }
     }
+
+    bool is_available() const override {
+        return fd > 0;
+    }
     
     ~qx_driver() override {
         if (fd > 0) {
@@ -215,4 +223,3 @@ public:
 };
 
 #endif // DRIVER_QX_H
-

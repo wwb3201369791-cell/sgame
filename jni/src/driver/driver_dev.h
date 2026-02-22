@@ -122,6 +122,10 @@ public:
         
         free(dev_path);
     }
+
+    bool is_available() const override {
+        return fd > 0;
+    }
     
     ~dev_driver() override {
         if (fd > 0) {
@@ -188,4 +192,3 @@ private:
 };
 
 #endif // DRIVER_DEV_H
-

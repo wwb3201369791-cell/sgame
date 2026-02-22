@@ -20,38 +20,53 @@ public:
     static driver_base* auto_detect() {
         printf("[DriverManager] 开始自动检测驱动...\n");
 
+        auto accept_or_delete = [](driver_base* drv) -> driver_base* {
+            if (!drv) return nullptr;
+            if (drv->is_available()) return drv;
+            delete drv;
+            return nullptr;
+        };
+
         // 优先级 1: QX 内核驱动 (ioctl 0x801/0x802)
         try {
-            auto* drv = new qx_driver();
-            printf("[DriverManager] ✓ QX驱动加载成功\n");
-            return drv;
+            if (auto* drv = accept_or_delete(new qx_driver())) {
+                printf("[DriverManager] ✓ QX驱动加载成功\n");
+                return drv;
+            }
+            printf("[DriverManager] ✗ QX驱动不可用\n");
         } catch (...) {
             printf("[DriverManager] ✗ QX驱动不可用\n");
         }
 
         // 优先级 2: RT Dev驱动 (/dev 6字母节点)
         try {
-            auto* drv = new dev_driver();
-            printf("[DriverManager] ✓ Dev驱动加载成功\n");
-            return drv;
+            if (auto* drv = accept_or_delete(new dev_driver())) {
+                printf("[DriverManager] ✓ Dev驱动加载成功\n");
+                return drv;
+            }
+            printf("[DriverManager] ✗ Dev驱动不可用\n");
         } catch (...) {
             printf("[DriverManager] ✗ Dev驱动不可用\n");
         }
 
         // 优先级 3: GT2.0 Proc驱动 (/proc 6字母节点)
         try {
-            auto* drv = new proc_driver();
-            printf("[DriverManager] ✓ Proc驱动加载成功\n");
-            return drv;
+            if (auto* drv = accept_or_delete(new proc_driver())) {
+                printf("[DriverManager] ✓ Proc驱动加载成功\n");
+                return drv;
+            }
+            printf("[DriverManager] ✗ Proc驱动不可用\n");
         } catch (...) {
             printf("[DriverManager] ✗ Proc驱动不可用\n");
         }
 
         // 优先级 4: RT HookPro驱动 (AF_INET SOCK_DGRAM ioctl)
         try {
-            auto* drv = new rt_hookpro_driver();
-            printf("[DriverManager] ✓ RT_HookPro驱动加载成功\n");
-            return drv;
+            if (auto* drv = accept_or_delete(new rt_hookpro_driver())) {
+                printf("[DriverManager] ✓ RT_HookPro驱动加载成功\n");
+                return drv;
+            }
+            printf("[DriverManager] ✗ RT_HookPro驱动不可用\n");
         } catch (...) {
             printf("[DriverManager] ✗ RT_HookPro驱动不可用\n");
         }

@@ -46,6 +46,10 @@ public:
             std::cout << "[+] RT HookPro驱动加载成功" << std::endl;
         }
     }
+
+    bool is_available() const override {
+        return fd > 0;
+    }
     
     ~rt_hookpro_driver() override {
         if (fd > 0) {
@@ -103,4 +107,3 @@ public:
 };
 
 #endif // DRIVER_RT_HOOKPRO_H
-
