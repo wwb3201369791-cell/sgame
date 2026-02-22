@@ -1,5 +1,6 @@
 #pragma once
 #include "imgui.h"
+#include "overlay.h"
 #include "../game/GameStructs.h"
 
 // ============================================================
@@ -127,55 +128,58 @@ inline void DrawFloatingBall() {
 // 绘制设置面板
 inline void DrawMenu() {
     if (!g_config.showMenu) return;
+    bool zh = overlay_has_cjk_font();
 
     ImGui::SetNextWindowSize(ImVec2(380, 500), ImGuiCond_FirstUseEver);
-    ImGui::Begin("HPHP Settings", &g_config.showMenu,
+    ImGui::Begin(zh ? "哈皮哈啤哈屁 设置" : "HPHP Settings", &g_config.showMenu,
         ImGuiWindowFlags_NoCollapse);
 
     // ===== Display =====
-    if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Checkbox("Minimap", &g_config.showMinimap);
-        ImGui::Checkbox("ESP Box", &g_config.showESP);
-        ImGui::Checkbox("Skill CD", &g_config.showSkillCD);
-        ImGui::Checkbox("Vision Alert", &g_config.showVisionAlert);
-        ImGui::Checkbox("Monster Timer", &g_config.showMonsterCD);
-        ImGui::Checkbox("Minions (TODO)", &g_config.showMinions);
+    if (ImGui::CollapsingHeader(zh ? "显示设置" : "Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox(zh ? "小地图点位" : "Minimap", &g_config.showMinimap);
+        ImGui::Checkbox(zh ? "ESP 方框" : "ESP Box", &g_config.showESP);
+        ImGui::Checkbox(zh ? "技能CD显示" : "Skill CD", &g_config.showSkillCD);
+        ImGui::Checkbox(zh ? "视野警示" : "Vision Alert", &g_config.showVisionAlert);
+        ImGui::Checkbox(zh ? "野怪计时" : "Monster Timer", &g_config.showMonsterCD);
+        ImGui::Checkbox(zh ? "兵线显示 (TODO)" : "Minions (TODO)", &g_config.showMinions);
     }
 
     ImGui::Separator();
 
     // ===== Render =====
-    if (ImGui::CollapsingHeader("Render")) {
-        ImGui::SliderFloat("Map Scale", &g_config.mapScale, 80.0f, 300.0f);
-        ImGui::SliderFloat("Map Offset X", &g_config.mapOffsetX, 0.0f, 500.0f);
-        ImGui::SliderFloat("Map Offset Y", &g_config.mapOffsetY, 0.0f, 500.0f);
-        ImGui::SliderFloat("ESP Line Width", &g_config.espLineWidth, 1.0f, 5.0f);
+    if (ImGui::CollapsingHeader(zh ? "绘制配置" : "Render")) {
+        ImGui::SliderFloat(zh ? "地图缩放" : "Map Scale", &g_config.mapScale, 80.0f, 300.0f);
+        ImGui::SliderFloat(zh ? "地图X偏移" : "Map Offset X", &g_config.mapOffsetX, 0.0f, 500.0f);
+        ImGui::SliderFloat(zh ? "地图Y偏移" : "Map Offset Y", &g_config.mapOffsetY, 0.0f, 500.0f);
+        ImGui::SliderFloat(zh ? "ESP线宽" : "ESP Line Width", &g_config.espLineWidth, 1.0f, 5.0f);
     }
 
     ImGui::Separator();
 
     // ===== Network =====
-    if (ImGui::CollapsingHeader("Network")) {
-        ImGui::Checkbox("Enable Network Share", &g_config.netEnabled);
-        ImGui::Checkbox("Server Mode", &g_config.isServer);
-        ImGui::InputText("Server IP", g_config.serverIP, sizeof(g_config.serverIP));
-        ImGui::InputInt("Port", &g_config.serverPort);
+    if (ImGui::CollapsingHeader(zh ? "网络共享" : "Network")) {
+        ImGui::Checkbox(zh ? "启用网络共享" : "Enable Network Share", &g_config.netEnabled);
+        ImGui::Checkbox(zh ? "作为服务端" : "Server Mode", &g_config.isServer);
+        ImGui::InputText(zh ? "服务器IP" : "Server IP", g_config.serverIP, sizeof(g_config.serverIP));
+        ImGui::InputInt(zh ? "端口" : "Port", &g_config.serverPort);
     }
 
     ImGui::Separator();
 
     // ===== Touch =====
-    if (ImGui::CollapsingHeader("Touch")) {
-        ImGui::Checkbox("Alt Mapping", &g_config.touchAltMapping);
-        ImGui::TextWrapped("If drag works only on one axis or is rotated, toggle Alt Mapping.");
+    if (ImGui::CollapsingHeader(zh ? "触摸" : "Touch")) {
+        ImGui::Checkbox(zh ? "备用映射" : "Alt Mapping", &g_config.touchAltMapping);
+        ImGui::TextWrapped("%s",
+            zh ? "如果拖动方向不对或只有单方向能动，请切换备用映射。"
+               : "If drag works only on one axis or is rotated, toggle Alt Mapping.");
     }
 
     ImGui::Separator();
-    if (ImGui::Button("Hide Menu")) {
+    if (ImGui::Button(zh ? "隐藏菜单" : "Hide Menu")) {
         g_config.showMenu = false;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Exit Tool")) {
+    if (ImGui::Button(zh ? "退出工具" : "Exit Tool")) {
         g_exitRequested = true;
     }
 

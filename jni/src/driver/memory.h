@@ -13,6 +13,9 @@
 
 static driver_base* g_driver = nullptr;
 static pid_t g_game_pid = 0;
+inline unsigned long long g_mem_read_total = 0;
+inline unsigned long long g_mem_read_fail = 0;
+inline uintptr_t g_mem_last_fail_addr = 0;
 
 // 初始化驱动 (自动检测)
 inline bool init_driver() {
@@ -122,21 +125,36 @@ inline uintptr_t get_bss_base(const char* module_name) {
 inline long read_long(uintptr_t addr) {
     if (!g_driver) return 0;
     long val = 0;
-    g_driver->read(addr, &val, sizeof(val));
+    bool ok = g_driver->read(addr, &val, sizeof(val));
+    g_mem_read_total++;
+    if (!ok) {
+        g_mem_read_fail++;
+        g_mem_last_fail_addr = addr;
+    }
     return val & 0xFFFFFFFFFFFF; // 48位地址掩码
 }
 
 inline int read_int(uintptr_t addr) {
     if (!g_driver) return 0;
     int val = 0;
-    g_driver->read(addr, &val, sizeof(val));
+    bool ok = g_driver->read(addr, &val, sizeof(val));
+    g_mem_read_total++;
+    if (!ok) {
+        g_mem_read_fail++;
+        g_mem_last_fail_addr = addr;
+    }
     return val;
 }
 
 inline float read_float(uintptr_t addr) {
     if (!g_driver) return 0.0f;
     float val = 0.0f;
-    g_driver->read(addr, &val, sizeof(val));
+    bool ok = g_driver->read(addr, &val, sizeof(val));
+    g_mem_read_total++;
+    if (!ok) {
+        g_mem_read_fail++;
+        g_mem_last_fail_addr = addr;
+    }
     return val;
 }
 

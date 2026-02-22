@@ -13,6 +13,10 @@ class GameReader {
 public:
     uintptr_t bssBase    = 0;   // libGameCore.so:bss 基址
     uintptr_t il2cppBase = 0;   // libil2cpp.so 基址 (矩阵用)
+    int       debugMatchRaw = 0;
+    uintptr_t debugEntityListHead = 0;
+    uintptr_t debugMonsterListHead = 0;
+    float     debugMatrix0 = 0.0f;
 
     GameState state;
 
@@ -52,9 +56,13 @@ public:
     // 每帧调用: 读取所有数据
     void Update() {
         memset(&state, 0, sizeof(state));
+        debugEntityListHead = 0;
+        debugMonsterListHead = 0;
+        debugMatrix0 = 0.0f;
 
         // 1. 判断是否在对局中
-        state.inMatch = (read_int(bssBase + Offsets::BSS::MatchState) != 0);
+        debugMatchRaw = read_int(bssBase + Offsets::BSS::MatchState);
+        state.inMatch = (debugMatchRaw != 0);
         if (!state.inMatch) return;
 
         // 2. 读取矩阵
@@ -117,11 +125,13 @@ private:
         uintptr_t matAddr = temp + Offsets::Matrix::MatrixStart;
         if (g_driver) {
             g_driver->read(matAddr, state.matrix, sizeof(float) * 16);
+            debugMatrix0 = state.matrix[0];
         }
     }
 
     void ReadHeroes() {
         uintptr_t listHead = (uintptr_t)read_long(bssBase + Offsets::BSS::EntityList);
+        debugEntityListHead = listHead;
         if (listHead == 0) return;
 
         // 自身实体
@@ -211,6 +221,7 @@ private:
 
     void ReadMonsters() {
         uintptr_t listHead = (uintptr_t)read_long(bssBase + Offsets::BSS::MonsterList);
+        debugMonsterListHead = listHead;
         if (listHead == 0) return;
 
         // BuffAddress = Read(Read(Read(listHead+0x3B8)+0x88)+0x120)

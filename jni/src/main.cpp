@@ -4,6 +4,7 @@
 #include <string.h>
 #include <time.h>
 #include <signal.h>
+#include <inttypes.h>
 
 // 模块头文件
 #include "stealth/stealth.h"
@@ -15,6 +16,7 @@
 #include "net/net.h"
 #include "Android_touch/TouchHelperA.h"
 #include "ANativeWindowCreator.h"
+#include "imgui.h"
 
 // ============================================================
 // 哈皮哈啤哈屁 — 王者荣耀视野共享工具
@@ -31,6 +33,37 @@ static void crash_handler(int sig) {
     printf("\n[CRASH] 信号 %d (%s), 帧=%d, 阶段=%s\n", sig, name, (int)g_loopCount, g_phase);
     fflush(stdout);
     _exit(128 + sig);
+}
+
+static void DrawDebugHUD(const GameReader& reader) {
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    if (!draw) return;
+
+    char line1[256];
+    char line2[256];
+    char line3[256];
+
+    snprintf(line1, sizeof(line1),
+             "DBG inMatch=%d raw=%d hero=%d mon=%d m0=%.3f",
+             reader.state.inMatch ? 1 : 0, reader.debugMatchRaw,
+             reader.state.heroCount, reader.state.monsterCount, reader.debugMatrix0);
+    snprintf(line2, sizeof(line2),
+             "DBG entity=0x%llX monster=0x%llX bss=0x%llX",
+             (unsigned long long)reader.debugEntityListHead,
+             (unsigned long long)reader.debugMonsterListHead,
+             (unsigned long long)reader.bssBase);
+    snprintf(line3, sizeof(line3),
+             "DBG readFail=%llu/%llu lastFail=0x%llX",
+             g_mem_read_fail, g_mem_read_total, (unsigned long long)g_mem_last_fail_addr);
+
+    ImVec2 p(18.0f, g_screenH - 90.0f);
+    draw->AddRectFilled(ImVec2(p.x - 8, p.y - 6), ImVec2(p.x + 620, p.y + 54),
+                        IM_COL32(0, 0, 0, 120), 6.0f);
+    draw->AddText(p, IM_COL32(255, 255, 255, 255), line1);
+    draw->AddText(ImVec2(p.x, p.y + 18), IM_COL32(255, 255, 255, 255), line2);
+    draw->AddText(ImVec2(p.x, p.y + 36),
+                  (g_mem_read_fail > 0 ? IM_COL32(255, 120, 120, 255) : IM_COL32(120, 255, 120, 255)),
+                  line3);
 }
 
 // 屏幕分辨率全局变量 (GameStructs.h 中 extern 声明)
@@ -220,6 +253,8 @@ int main(int argc, char** argv) {
         DrawFloatingBall();
         g_phase = "DrawMenu";
         DrawMenu();
+        g_phase = "DebugHUD";
+        DrawDebugHUD(reader);
 
         // 6. 结束渲染帧
         g_phase = "overlay_end";

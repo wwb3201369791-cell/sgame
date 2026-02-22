@@ -17,6 +17,11 @@ static int g_window_width = 0;
 static int g_window_height = 0;
 static bool g_imgui_android_inited = false;
 static bool g_imgui_gl3_inited = false;
+static bool g_has_cjk_font = false;
+
+bool overlay_has_cjk_font() {
+    return g_has_cjk_font;
+}
 
 static void overlay_cleanup_egl() {
     if (g_display != EGL_NO_DISPLAY) {
@@ -106,6 +111,8 @@ bool overlay_init(int width, int height) {
         return fail("eglMakeCurrent 失败");
     }
 
+    g_has_cjk_font = false;
+
     // 3. ImGui 初始化
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -128,7 +135,17 @@ bool overlay_init(int width, int height) {
         "/system/fonts/Roboto-Regular.ttf"
     };
     bool fontLoaded = false;
-    const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+
+    // 仅构建本工具 UI/警示所需的中文字形，避免整套简中字符集导致图集过大失败
+    ImFontGlyphRangesBuilder gb;
+    gb.AddRanges(io.Fonts->GetGlyphRangesDefault());
+    gb.AddText("哈皮哈啤哈屁设置显示小地图点位方框技能视野警示野怪计时兵线绘制配置地图缩放偏移网络共享启用作为服务端服务器端口触摸备用映射如果拖动方向不对可切换隐藏菜单退出工具中文可能显示不全");
+    gb.AddText("你已暴露在敌方视野中未知治疗晕眩惩戒干扰净化斩杀疾跑狂暴闪现弱化");
+    gb.AddText("野怪");
+    ImVector<ImWchar> glyphRangesVec;
+    gb.BuildRanges(&glyphRangesVec);
+    const ImWchar* glyphRanges = glyphRangesVec.empty() ? io.Fonts->GetGlyphRangesDefault() : glyphRangesVec.Data;
+
     const float fontSizes[] = { 26.0f, 22.0f, 18.0f };
     for (auto path : fontPaths) {
         if (access(path, R_OK) != 0) continue;
@@ -141,12 +158,13 @@ bool overlay_init(int width, int height) {
                 continue;
             }
             if (!io.Fonts->Build()) {
-                printf("[Overlay] ⚠ 字体图集构建失败: %s (ChineseSimplifiedCommon, %.0fpx), 尝试降级\n", path, size);
+                printf("[Overlay] ⚠ 字体图集构建失败: %s (custom CJK subset, %.0fpx), 尝试降级\n", path, size);
                 continue;
             }
 
             fontLoaded = true;
-            printf("[Overlay] ✓ 字体加载: %s (ChineseSimplifiedCommon, %.0fpx)\n", path, size);
+            g_has_cjk_font = (strstr(path, "Roboto") == nullptr);
+            printf("[Overlay] ✓ 字体加载: %s (custom CJK subset, %.0fpx)\n", path, size);
             break;
         }
         if (fontLoaded) break;
@@ -157,6 +175,7 @@ bool overlay_init(int width, int height) {
         if (!io.Fonts->Build()) {
             return fail("默认字体图集构建失败");
         }
+        g_has_cjk_font = false;
         printf("[Overlay] ⚠ 使用默认字体 (中文可能显示不全)\n");
     }
 
