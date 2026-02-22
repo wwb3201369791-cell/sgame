@@ -14,6 +14,7 @@
 #include "render/render.h"
 #include "net/net.h"
 #include "Android_touch/TouchHelperA.h"
+#include "ANativeWindowCreator.h"
 
 // ============================================================
 // 哈皮哈啤哈屁 — 王者荣耀视野共享工具
@@ -40,6 +41,14 @@ float g_screenH = 1080.0f;
 static void GetScreenSize(int& w, int& h) {
     // 默认值
     w = 2340; h = 1080;
+
+    // 优先用 SurfaceComposer 获取当前方向下的真实尺寸（比 wm size 更准确）
+    auto di = android::ANativeWindowCreator::GetDisplayInfo();
+    if (di.width > 0 && di.height > 0) {
+        w = di.width;
+        h = di.height;
+        return;
+    }
 
     FILE* f = popen("wm size", "r");
     if (f) {
@@ -107,6 +116,11 @@ int main(int argc, char** argv) {
     printf("[✓] EGL覆盖层初始化完成\n");
 
     // ===== Step 5.1: 触摸输入 (用于悬浮球/菜单交互, 只读不抢占游戏触摸) =====
+    auto di = android::ANativeWindowCreator::GetDisplayInfo();
+    if (di.width > 0 && di.height > 0) {
+        Touch::setOrientation(di.orientation);
+        printf("[Touch] 显示方向: %d, 显示尺寸: %dx%d\n", di.orientation, di.width, di.height);
+    }
     if (Touch::Init({(float)screenW, (float)screenH}, true)) {
         printf("[✓] 触摸输入初始化完成 (只读模式)\n");
     } else {

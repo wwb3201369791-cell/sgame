@@ -36,9 +36,18 @@ static Config g_config;
 static bool   g_ballDragging = false;
 static ImVec2 g_ballPos = ImVec2(50.0f, 300.0f);
 static float  g_ballRadius = 30.0f;
+static bool   g_ballPosInited = false;
 
 // 绘制浮动悬浮球 (点击切换菜单)
 inline void DrawFloatingBall() {
+    ImGuiIO& io = ImGui::GetIO();
+
+    // 首帧按当前显示尺寸放到左侧中上区域，避免固定坐标在横屏设备上跑偏
+    if (!g_ballPosInited && io.DisplaySize.x > 0.0f && io.DisplaySize.y > 0.0f) {
+        g_ballPos = ImVec2(io.DisplaySize.x * 0.12f, io.DisplaySize.y * 0.32f);
+        g_ballPosInited = true;
+    }
+
     ImDrawList* draw = ImGui::GetForegroundDrawList();
 
     // 浮球颜色
@@ -57,7 +66,6 @@ inline void DrawFloatingBall() {
         IM_COL32(255, 255, 255, 255), txt);
 
     // 交互检测
-    ImGuiIO& io = ImGui::GetIO();
     ImVec2 mousePos = io.MousePos;
     float dist = sqrtf((mousePos.x - g_ballPos.x) * (mousePos.x - g_ballPos.x) +
                        (mousePos.y - g_ballPos.y) * (mousePos.y - g_ballPos.y));
