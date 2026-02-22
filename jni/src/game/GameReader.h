@@ -18,26 +18,32 @@ public:
 
     // 初始化: 定位 bss 基址
     bool Init() {
-        // libGameCore.so 的 bss 段
-        bssBase = get_module_base("libGameCore.so:bss");
-        if (bssBase == 0) {
-            // 回退: 用整体模块基址 + 已知偏移
-            // (BSS在ELF的末尾，需要从maps中定位)
+        // 方法1: 通过 /proc/pid/maps 找 libGameCore.so 的 BSS 段 (最后一个rw-p映射)
+        bssBase = get_bss_base("libGameCore.so");
+        if (bssBase != 0) {
+            printf("[GameReader] ✓ BSS基址 (rw-p映射): 0x%lX\n", bssBase);
+        } else {
+            // 方法2: 回退到text段基址 (不准确,但至少不为0)
             bssBase = get_module_base("libGameCore.so");
             if (bssBase != 0) {
-                printf("[GameReader] 注意: 使用libGameCore.so整体基址，BSS偏移可能不准\n");
+                printf("[GameReader] ⚠ 仅找到text基址: 0x%lX (BSS偏移可能不准)\n", bssBase);
             }
         }
         if (bssBase == 0) {
             printf("[GameReader] ✗ 无法定位 libGameCore.so\n");
             return false;
         }
-        printf("[GameReader] ✓ BSS基址: 0x%lX\n", bssBase);
 
-        // il2cpp (矩阵)
-        il2cppBase = get_module_base("libil2cpp.so");
-        if (il2cppBase != 0) {
-            printf("[GameReader] ✓ il2cpp基址: 0x%lX\n", il2cppBase);
+        // il2cpp BSS (矩阵) — 也优先找 BSS 段
+        uintptr_t il2cppBss = get_bss_base("libil2cpp.so");
+        if (il2cppBss != 0) {
+            il2cppBase = il2cppBss;
+            printf("[GameReader] ✓ il2cpp BSS: 0x%lX\n", il2cppBase);
+        } else {
+            il2cppBase = get_module_base("libil2cpp.so");
+            if (il2cppBase != 0) {
+                printf("[GameReader] ⚠ il2cpp text基址: 0x%lX\n", il2cppBase);
+            }
         }
 
         return true;

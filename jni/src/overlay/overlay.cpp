@@ -110,6 +110,7 @@ bool overlay_init(int width, int height) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->TexDesiredWidth = 2048; // 降低首帧字体图集压力（移动端更稳）
 
     // 禁用 imgui.ini 保存
     io.IniFilename = nullptr;
@@ -127,18 +128,23 @@ bool overlay_init(int width, int height) {
         "/system/fonts/Roboto-Regular.ttf"
     };
     bool fontLoaded = false;
+    const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
     for (auto path : fontPaths) {
         if (access(path, R_OK) == 0) {
-            io.Fonts->AddFontFromFileTTF(path, 32.0f, &fontCfg,
-                io.Fonts->GetGlyphRangesChineseFull());
-            fontLoaded = true;
-            printf("[Overlay] ✓ 字体加载: %s\n", path);
-            break;
+            ImFont* font = io.Fonts->AddFontFromFileTTF(path, 26.0f, &fontCfg, glyphRanges);
+            if (font) {
+                fontLoaded = true;
+                printf("[Overlay] ✓ 字体加载: %s (ChineseSimplifiedCommon, 26px)\n", path);
+                break;
+            }
         }
     }
     if (!fontLoaded) {
         io.Fonts->AddFontDefault();
         printf("[Overlay] ⚠ 使用默认字体\n");
+    }
+    if (!io.Fonts->Build()) {
+        return fail("字体图集构建失败");
     }
 
     // 5. 应用自定义主题 (淡白·柔粉·暖黄)
@@ -153,6 +159,11 @@ bool overlay_init(int width, int height) {
         return fail("ImGui_ImplOpenGL3_Init 失败");
     }
     g_imgui_gl3_inited = true;
+    printf("[Overlay] ... 构建字体纹理\n");
+    if (!ImGui_ImplOpenGL3_CreateFontsTexture()) {
+        return fail("ImGui_ImplOpenGL3_CreateFontsTexture 失败");
+    }
+    printf("[Overlay] ✓ 字体纹理构建完成\n");
 
     // 7. 开启混合 (透明渲染必需)
     glEnable(GL_BLEND);

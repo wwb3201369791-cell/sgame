@@ -70,7 +70,7 @@ inline uintptr_t get_module_base(const char* name) {
         if (base != 0) return base;
     }
 
-    // 回退: 解析 /proc/<pid>/maps
+    // 回退: 解析 /proc/<pid>/maps (找第一个匹配行 = text段基址)
     if (g_game_pid <= 0) return 0;
 
     char maps_path[64];
@@ -89,6 +89,30 @@ inline uintptr_t get_module_base(const char* name) {
     }
     fclose(f);
     return 0;
+}
+
+// 获取模块的BSS段基址 (找最后一个 rw-p 映射)
+// BSS在ELF内存映射中通常是最后一个可读写区域
+inline uintptr_t get_bss_base(const char* module_name) {
+    if (g_game_pid <= 0) return 0;
+
+    char maps_path[64];
+    snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", g_game_pid);
+    FILE* f = fopen(maps_path, "r");
+    if (!f) return 0;
+
+    char line[512];
+    uintptr_t lastRW = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, module_name) && strstr(line, "rw-")) {
+            uintptr_t addr = 0;
+            sscanf(line, "%lx-", &addr);
+            lastRW = addr;
+        }
+    }
+    fclose(f);
+    return lastRW;
 }
 
 // ============================================================
